@@ -1,0 +1,213 @@
+---
+title: "Global Baseline Predictors and RMSE"
+author: "Anil Akyildirim"
+date: "6/8/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Introduction
+
+The recommender system that we will create in this assignment will recommend a product to a consumer through the business website based on previously collected product ratings data from other consumers. The use case of the recommender system is that, as a business we want the fastest purchase funnel in order to increase conversion. For example, Colgate allows users to provide ratings based to their products. Similary Colgate sells the same products in Amazon or Wallmart (https://www.amazon.com/s?k=colgate+whitening+toothpaste&crid=33FXM4TZIJEDB&sprefix=colgate+white%2Caps%2C145&ref=nb_sb_ss_i_1_13 or https://www.walmart.com/search/?query=colgate%20toothpaste&typeahead=colgate) . We can leverage these ratings data to recommend products within the brand owned ecommerce website.
+
+ 
+
+## Data Collection
+
+We will pick one brand and multiple products to create our dataset and assume these review ratings are collected via different websites by utilizing third party reviews application such as Power Reviews and provided to us.
+
+
+```{r}
+# creating the dataset
+
+retail <- c("colgate", "walmart", "amazon", "cvs", "rite_aid", "duane_read")
+
+products <- c("zero", "pepermint", "optic_white", "advanced", "stain_fighter", "charcoal")
+
+zero <- c(5,4,4,5,3,2)
+pepermint <- c(3,4,5,2,5,4)
+optic_white <- c(5,5,5,3,3,NA)
+advanced <- c(2,3,3,NA,5,NA)
+stain_fighter <- c(3,NA,NA,5,3,4)
+charcoal <- c(1,3,2,2,NA,3)
+
+```
+
+```{r}
+
+ratings <-data.frame(zero,pepermint, optic_white,advanced,stain_fighter,charcoal)
+rownames(ratings) <- retail
+ratings
+
+
+
+```
+
+### Breaking up Test and Train Datasets
+
+We have our dataset, we will further select our samples and create our test and train sets. 
+
+```{r}
+# setting up test data
+samples <- rbind(c(2,3), c(2,1), c(1,3), c(1,6), c(6,6), c(3,2))
+test <- as.numeric(ratings[samples])
+test
+
+
+```
+
+```{r}
+#setting up train data
+train <- ratings
+train[samples] <- NA
+train
+
+```
+
+### Calculating Raw Average(Mean) rating.
+
+Since we broke the ratings into separate training and test datasets, we can further calculate raw average(mean) rating for every combination.
+
+```{r}
+#average training set
+train_average <- mean(as.matrix(train), na.rm = TRUE) # we need to make sure we dont count the NA values
+train_average
+
+
+```
+
+
+```{r}
+# average of test values
+test_average <- mean(test)
+test_average
+
+
+```
+
+### Calculating RMSE for Train and Test. 
+
+Next, we will calculate the RMSE for raw average for both training and test data. Raw average rating is the square root of the average of the squared differences between the training set and the raw average. Basically we are looking at the error , the difference between the actual and predicted values, square rooting them to make sure no negative values, adding all the values, dividing them with the not missing values and take the square root of the result. 
+
+```{r}
+# RMSE for train
+train_RMSE <- sum(((train-train_average)^2),na.rm=TRUE)
+train_RMSE <- sqrt(train_RMSE / length(train_RMSE[!is.na(train-train_average)]))
+train_RMSE
+
+
+```
+
+```{r}
+# RMSE for test
+test_RMSE <- sqrt(sum(((test - train_average)^2), na.rm = TRUE) / length(test[!is.na(test)]))
+test_RMSE
+
+
+
+```
+
+
+### Calculating Bias
+
+We are going to find the bias from consumers (that leaves reviews in particulare retailers) and products. 
+
+
+```{r}
+#consumer bias
+product_bias <- colMeans(train, na.rm = TRUE) - train_average
+
+#product bias
+retailer_bias <- rowMeans(train, na.rm = TRUE) - train_average
+
+```
+
+
+```{r}
+product_bias
+```
+
+
+```{r}
+retailer_bias
+
+```
+
+### Calculating Baseline Predictors
+
+For baseline predictors, we will be looking at every consumer, the product that they provide the rating and the item biases. Baseline Predictors = Raw Average + Consumer Bias + Product Bias
+
+```{r}
+
+# set upo the empty baseline matrix
+baseline <- as.data.frame(matrix(nrow=6, ncol=6))
+
+# iteration for each retailer and product bias
+
+for (i in 1:length(retailer_bias)){
+  row <- c(product_bias + retailer_bias[i] + train_average)
+  #print(row)
+  baseline[i, ] <- row
+}
+
+rownames(baseline) <- retail
+colnames(baseline) <- colnames(ratings)
+baseline
+
+```
+
+### Calculating RMSE for the baseline predctor 
+
+```{r}
+
+#train baseline RMSE
+
+baseline_train_RMSE <- sqrt(sum((train - baseline)^2, na.rm=TRUE) / length(ratings[!is.na(ratings)]))
+baseline_train_RMSE
+
+
+
+```
+
+
+
+```{r}
+
+#test baseline RMSE
+baseline_test <- baseline[samples]
+baseline_test_RMSE <- sqrt(sum((test - baseline_test)^2) / length(test))
+baseline_test_RMSE
+
+
+
+```
+
+## Conclusion
+
+```{r}
+
+# Summarize table results
+# percent change
+train_change = round((1-(baseline_train_RMSE/train_RMSE))*100, 2)
+test_change = round((1-(baseline_test_RMSE/test_RMSE))*100, 2)
+
+Raw_Average = c(train_average, test_average) 
+RMSE = c(train_RMSE, test_RMSE) 
+Baseline_RMSE = c(baseline_train_RMSE, baseline_test_RMSE)
+Change_Percent = c(train_change, test_change) 
+
+results = data.frame(Raw_Average, RMSE, Baseline_RMSE, Change_Percent)
+row.names(results) = c("Training Set", "Test Set")
+
+results
+
+```
+
+
+
+When we look at the retailer - product interaction on the duane read consumer's give some harsh ratings or no ratings specially to "Colgate Zero" and "Charcoal" products. So we can see that consumer's that shops from different retailers provide different ratings. This concept actualy is the basis of baseline predictor. We start with taking the raw Average, we add in bias for the user and we add in bias for the movie. We calculated bias for retailers and products in order to find the baseline predictors. Looking at the Basline RMSE, there is a small increase. Both for the training set and test set the RMSE is not significantly high. Comparing the Baseline RMSE with the RMSE we see %20 improvement of the training set and ~22% for the test set. 
+
