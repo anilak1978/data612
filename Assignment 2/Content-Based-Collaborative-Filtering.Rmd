@@ -1,0 +1,393 @@
+---
+title: "Content Based and Collaborative Filtering - Project 2"
+author: Anil Akyildirim
+date: "05/10/2020"
+output:
+  html_document:
+    code_download: yes
+    code_folding: hide
+    highlight: pygments
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+# Introduction
+
+In this assignment, we will work with MovieLens dataset, leveraging the course text's recommender lab , perform certain data analysis and further implement Item-Item and User-User Collaborative Filtering recommendation system.The goal of the assignment is to figure out different ways to create and configure a recommender system and further evaluate these approaches. 
+
+## About the Data
+
+MovieLense data set provides 100k ratings of the movies which were collected through the MovieLens website (movielens.umn.edu) during the seven-month period from September 19th, 1997 through April 22nd, 1998. In this dataset, we have 100,000 ratings which are between 1 and 5 from 943 users on 1664 movies. 
+
+# Data Collection
+
+
+```{r}
+# Load Libraries
+library(tidyverse)
+library(kableExtra)
+library(recommenderlab)
+library(ggplot2)
+library(caTools)
+
+```
+
+```{r}
+
+set.seed(1)
+data("MovieLense")
+MovieLense
+
+```
+
+Initially, we can look at the brief overview of the dataset. For example, let's look at the first few ratings of the first user.
+
+```{r}
+
+head(as(MovieLense[1,], "list")[[1]])
+
+```
+
+The "MovieLense" object class is "realRatingsMatrix". The data set also provides the metadata of each movie as a dataframe format.
+
+```{r}
+
+head(MovieLenseMeta)
+
+```
+
+We can look at the brief visualization of the portion of the matrix. 
+
+```{r}
+# visualize part of the matrix (sparsity!)
+image(MovieLense[1:100,1:100])
+
+```
+
+We can also look at the distribution of ratings and movies.
+
+```{r}
+# number of ratings per user
+hist(rowCounts(MovieLense))
+
+```
+
+```{r}
+# number of ratings per movie
+hist(colCounts(MovieLense))
+
+```
+
+```{r}
+# mean rating (averaged over users)
+mean(rowMeans(MovieLense))
+
+```
+
+
+# Data Exploration
+
+Regardless of using Content Filtering or Collaborative Filtering method, user can provide one rating entry for each movie. For example, user 1 rated movie Golden Eye 3, not 3 and/or 5. So we need to look at the ratings as vectors. 
+
+```{r}
+#create ratings object
+ratings <- as.vector(MovieLense@data)
+
+```
+
+Let's look at the first couple sets of ratings.
+
+```{r}
+# review first ratings
+ratings[0:5]
+
+```
+
+Based on the description of the dataset, the rating system should be between 1 to 5. So we can subset the vector with ratings that are not 0.
+
+```{r}
+# no ratings with 0
+ratings <- ratings[ratings != 0]
+
+```
+
+Let's look at the distribution of the ratings within the dataset.
+
+
+```{r}
+# visualize the distribution of ratings
+g <- ggplot()
+g + aes(ratings)+
+  geom_histogram(binwidth = 1,
+                 color="red",
+                 size=0.1)+
+  labs(title="Rating's Distribution")+
+  xlab("Rating")+
+  ylab("Number of Ratings")
+
+
+```
+
+We can see that the majority of the ratings are 4, followed by 3 and 5.
+
+Let's create our matrix and look at the sparsity in our matrix.
+
+
+```{r}
+# create the matrix
+movie_lense_matrix <- MovieLense@data
+#movie_lense_matrix (commenting these as the output takes too much space in rmarkdown)
+```
+
+
+```{r}
+
+#visualizing sparse matrix
+# https://stackoverflow.com/questions/56631690/how-to-plot-a-sparse-matrix-in-r
+
+movie_lense_matrix %>% as.vector %>% 
+  tibble(value = ., row = rep(1:nrow(movie_lense_matrix), times = ncol(movie_lense_matrix)),
+                                         col = rep(1: ncol(movie_lense_matrix), each = nrow(movie_lense_matrix))) %>%
+  ggplot(aes(x = row, y = col, fill = value)) +
+  geom_tile(size = 2) +
+  scale_fill_gradient(low = 'black',high = 'white')+
+  theme_minimal() +
+  theme(legend.position = 'none')
+
+```
+
+
+We see our matrix sparsity. We can also look at the subset of the matrix in terms of sparsity to better understand. 
+
+
+```{r}
+# we will visualize the matrix we created -subset
+
+image(movie_lense_matrix[1:50, 1:50], main="Ratings")
+
+
+
+```
+
+Let's normalize the ratings and compare.
+
+
+```{r}
+
+# normalizing lthe large matrix
+movie_lense_matrix_norm <- as(as.matrix(movie_lense_matrix), "realRatingMatrix")
+movie_lense_matrix_norm <- normalize(movie_lense_matrix_norm)
+
+```
+
+After normalizing the matrix, lets look at the sparsity again. 
+
+```{r}
+#visualize the normalized matrix
+image(movie_lense_matrix_norm[1:50, 1:50], main="Normalized Ratings")
+
+
+```
+
+
+# Data Preperation
+
+In order to create the model and evaluate the prediction later on, let's create test and train set. While creating the train and test data set, if we use the entire matrix, we get an issue on creating the model due to its size. We can subset the data to further create our train and test dataset.Let's only grab what we think is useful for the project.
+
+
+```{r}
+# subset, create train and test (20/80)
+movies <- MovieLense[rowCounts(MovieLense) > 50, colCounts(MovieLense) > 50]
+train <- sample(x = c(TRUE, FALSE), size = nrow(movies), replace = TRUE, prob = c(0.8, 0.2))
+movies_train <- movies[train, ]
+movies_test <- movies[!train, ]
+
+```
+
+
+# Model Development
+
+## Item-Item Collaborative Filtering
+
+For item to item collaborative filter method, we will find similar items. For example, for movie i, we will find movies similar to movie i. We estimate the rating for movie i based on the rating of the similar movies that we found. We look at similarity of movie i to other movies. Then we further define top K movies in that N (neighbourhood) set of movies to recommend to user X. First let's look at the similar items in our movies.
+
+```{r}
+similarity_movies <- similarity(MovieLense, method="cosine", which="items")
+image(as.matrix(similarity_movies), main = "Movie Similarity")
+
+
+```
+
+
+```{r}
+# look at the similarity on the subset data
+similarity_movies <- similarity(movies, method="cosine", which="items")
+image(as.matrix(similarity_movies), main = "Movie Similarity")
+
+```
+
+
+```{r}
+# create the item to item model
+item_item_model <- Recommender(movies_train, method = "IBCF" ,param=list(k=20)) # top 20 items
+
+```
+
+
+```{r}
+# get details of the model
+model_details <-getModel(item_item_model)
+model_details
+
+
+```
+
+
+```{r}
+# look at the heatmap of top 100 items
+n_items_top <- 100
+image(model_details$sim[1:n_items_top, 1:n_items_top], main = "Heatmap of the first 100 rows and columns")
+
+```
+
+We can further create recommendations.
+
+```{r}
+# we will first define n_items number of movies we want to recommend to the user
+
+n_items <- 5
+predicted <- predict(object=item_item_model, newdata=movies_test, n=n_items)
+predicted
+
+```
+
+```{r}
+# create recommendation matrix
+recc_matrix <- sapply(predicted@items, function(x) {colnames(movies)[x]})
+recc_matrix[, 1:4]%>% kable() %>% kable_styling(full_width = T) 
+```
+
+
+## User - User collaborative Filter
+
+For user to user method; the idea is that we have user X,  we will find N set of users whose ratings are similar to user X's ratings. N users will represent the neighbourhood of the user X. Then we will estimate the X's ratings based on ratings of users in the set N. So, we need to figure out the similarity between users. In order to do that, we are going to use the pearson similarity.
+
+
+```{r}
+
+# similarity matrix
+similarity_users <- similarity(MovieLense, method = "pearson", which = "users")
+# visualization
+image(as.matrix(similarity_users), main = "Users similarity")
+
+
+```
+
+```{r}
+
+# look at the subset data
+similarity_users <- similarity(movies, method="pearson", which="items")
+image(as.matrix(similarity_users), main = "Users Similarity")
+
+
+
+```
+
+
+```{r}
+# create the model
+user_user_model <- Recommender(data = movies_train, method = "UBCF")
+model_2_details <- getModel(user_user_model)
+model_2_details
+
+```
+
+We will further create movie recommendation. 
+
+
+```{r}
+
+n_users <-5
+predicted_2 <- predict(object = user_user_model, newdata = movies_test, n = n_users)
+predicted_2
+
+
+```
+
+
+```{r}
+# create prediction matrix
+
+recc_matrix2 <- sapply(predicted_2@items, function(x) {colnames(movies)[x]})
+recc_matrix2[, 1:3] %>% kable() %>% kable_styling(full_width = T)
+
+
+
+```
+
+
+# Model Evalution
+
+Both IBCF and UBCF algorithms we created can be optimized with certain parameters we apply. We didnt put any consideration in order to set the parameters such as, we selected k=20 for IBCF model with centering normalization.  We can try to creating multiple models and see what K# gives us the best results. 
+
+
+```{r}
+# sample errors of predicted ratings: UBCF vs IBCF
+es <- evaluationScheme(movies, method = "split", train = 0.9, given = 20, goodRating = 5)
+rec1 <- Recommender(getData(es, "train"), "UBCF")
+rec1 
+
+
+```
+
+```{r}
+rec2 <- Recommender(getData(es, "train"), "IBCF")
+rec2
+```
+
+
+```{r}
+pred1 <- predict(rec1, getData(es, "known"), type = "ratings")
+pred1
+
+```
+
+```{r}
+
+pred2 <- predict(rec2, getData(es, "known"), type = "ratings")
+pred2
+
+```
+
+```{r}
+
+error <- rbind(
+    UBCF = calcPredictionAccuracy(pred1, getData(es, "unknown")),
+    IBCF = calcPredictionAccuracy(pred2, getData(es, "unknown"))
+)
+error %>% 
+  round(3) %>% 
+  kable(caption = "UBCF vs. IBCF")
+
+
+```
+
+
+
+
+# Conclusion
+
+In this assignment we have created two Collaborative Filter Model, user to user and item to item collaborative filter. For each model we created movie recommendations. We further evaluated each model. Based on our evaluation, we can see that user to user collaborative filter model have better accuracy in terms of recommendations that it provides. (Both RMSE and MAE is lower in USer to User Method.). 
+
+
+
+
+
+
+
+
+
