@@ -1,0 +1,25 @@
+---
+title: "Spotify Recommendation Engine"
+author: "Anil Akyildirim"
+date: "6/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Music Recommendations at Scale with Spark (Spotify)
+
+The presentation from Christopher Johnson was interesting in terms of infrastructure and efficiency of execution of Collaborative filtering at Spotify. I was aware of the different ways to browse and discover songs and albums at Spotify however didn’t realize how these options help get personalized user input. 
+
+At Christopher’s presentation we heard many ways to generate recommendations such as manual curation, manually adding tag attributes to each song, analyzing audio content and text analysis and collaborative filtering. Even though the presentation was about scaling the collaborating filtering system that is in place at Spotify, It was interesting to hear about the other options. For example, I wasn’t aware of the fact that Pandora collects expertise input on the songs for attribute tagging or was not aware Spotify also perform audio content, music blogs and news text analysis in order to provide recommendations. 
+
+
+In the presentation, Christopher also walked us through the method Netflix uses which is Explicit Matrix Factorization. Users explicitly rate a subset of movie catalog as not all users are watching and rating all the movies. The goal is to predict how users will rate new movies. The way we look at this is by approximating the ratings matrix by the product of lower dimension user and movie matrices. Instead of using millions of users and movies, we look at maybe 100 of them. As expected the idea is to minimize the RMSE. In Spotify, they use the same approach but instead of using explicit ratings, they use binary (0 and 1) data. If user is streaming a song, they get the value of 1, if the user is not streaming the value of the song gets 0 for that user. The further they weigh the 0s and 1s. For example, if a user streams GNRS 100 times and Frank Sinatra 1 time, the weigh of the songs for that user get calculated accordingly. (They weigh it with some confidence). They perform Alternating regression (we go back and forth to solve the LS regression which actually becomes weighted ridge regression with certain loss function.
+
+
+The biggest problem of the ALS method that Spotify had to solve was scalability. Initially they used Hadoop (Implicit Factorization with Hadoop). Without going into too much detail, as my understanding, the idea is to create a subset of data (K row and L columns), block them and each iteration perform the factorization to each block. This brings the issue of create, read and execute each iteration which creates performance issues. This is where Spark comes into play where loads the iterations into memory and caches it doesn’t read, write and execute the entire disk all the time.  Comparing the ALS Run times the best performance would be with Spark -half gridy).
+Christopher also gives some heads up on some of the Spark functions. I am not well versed with Spark and looking forward to learning going forward. 
+
+
