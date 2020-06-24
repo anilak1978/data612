@@ -1,0 +1,356 @@
+---
+title: "Matrix Factorization - Project 3"
+author: Anil Akyildirim
+date: "06/21/2020"
+output:
+  html_document:
+    code_download: yes
+    code_folding: hide
+    highlight: pygments
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+# Introduction
+
+In this project, we are going to review the Matrix Factorization methods with the same data set we have used in the earlier project (MovieLense). In the previous project, while we were creating the Movie Ratings Matrix, we used  "realRatingMatrix" class". More details on "realRatingMatrix" can be found here: https://www.rdocumentation.org/packages/recommenderlab/versions/0.2-5/topics/realRatingMatrix .With this project, we are going to implement SVD with using realRatingMatrix class and recommenderlab package and keeping the matrix as sparse matrix of class dgCMatrix and replacing the NA(or 0) values with calculating the baseline predictor.
+
+```{r}
+# Load Libraries
+
+library(tidyverse)
+library(kableExtra)
+library(recommenderlab)
+library(ggplot2)
+library(caTools)
+
+```
+
+# Data Collection
+
+Similar to project 2, we will load the MoviLense and create our Matrix
+
+
+```{r}
+
+set.seed(1)
+data("MovieLense")
+MovieLense
+
+```
+
+
+```{r}
+
+# create the matrix
+movie_lense_matrix <- MovieLense@data
+```
+
+# Model Development Approach 1 
+
+## Matrix Factorization
+
+Users and items gets modeled to a joint latent factor space of dimensionality f so that the user-item iteractions are modeled as the inner products within the space f. 
+
+$i --> item$
+
+$q_{i} --> item vector$
+
+$p_{u} --> user vector$
+
+For a given item $i$, the elements of $q_{i}$ measure the extent to which the item possesses those factors positive or negative. For a given user u, the elements of $p_{u}$ measure the extent of interest the user has in items that are high on the corresponding factors, again, positive or negative. The resulting dot product, $q_{i}^{T}$$p_{u}$, captures the interaction between user $u$ and item $i$ —the user’s overall interest in the item’s characteristics. This approximates user $u$’s rating of item i, which is denoted by $r_{ui}$, leading to the estimate $r_{ui}=q_{i}^{T}p_{u}$ . This model would be singular value decomposition(SVD) an approach to idenfitfy latent sementic factors. 
+
+In a nutshell, SVD is
+
+$R=PAQ^{T}$ --> We have three matrices, P, A, Q where we multiply them we get the matrix of R. R is m * n ratings matrix, P is m * k user feature affinity matrix, Q is n * k item feature relevance matrix and A is k * k diagonal feature weight matrix. The R , original matrix can be estimated by the product of all these matrices. 
+
+** SVD describes preference in terms of latent features
+
+** These features are learned from the rating data 
+
+** As explained in the begining, defines a shared vector space for users and items.
+
+
+We created the movie_lense_matrix, we know from previous project that we need to subset. 
+
+
+
+```{r}
+# subset the dataset
+movies_1 <- movie_lense_matrix[rowCounts(MovieLense) > 100, colCounts(MovieLense) > 100]
+
+```
+
+```{r}
+#replace 0 with NA
+movies_1[,][movies_1[,] == 0] <- NA
+
+```
+
+
+```{r}
+
+summary(as.vector(as.matrix(movies_1)))
+
+
+```
+
+
+## Data Preperation
+
+SVD requires that there are no missing values. In our subset matrix, we have 73,782 missing values that we can replace them with the mean value. We can also use the baseline predictor approach. We calculate the user and item biases in the matrix, then replace the missing values with the sum of the raw mean, user and item biases. 
+
+
+```{r}
+
+# get mean value of the matrix
+raw_mean <- mean(as.vector(as.matrix(movies_1)), na.rm = TRUE )
+raw_mean
+
+```
+
+
+```{r}
+# count number of non-NA's in each row of training set
+row_valid <- rowSums(!is.na(movies_1[,]))
+
+# count number of non-NA's in each column of training set
+col_valid <- colSums(!is.na(movies_1[,]))
+
+# calculate user biases
+user_biases <- rowMeans(movies_1[,] - raw_mean, na.rm = TRUE) / row_valid
+
+# calculate item biases
+item_biases <- colMeans(movies_1[,] - raw_mean, na.rm = TRUE) / col_valid
+
+# memory cleanup
+rm(row_valid, col_valid)
+
+```
+
+
+
+```{r}
+for (i in 1:nrow(movies_1)) {
+  for (j in 1:ncol(movies_1)) {
+    
+    # if the matrix element has an NA, fill in with baseline predictor
+    if(is.na(movies_1[i,j])) {
+          movies_1[i,j] <- raw_mean + user_biases[i] + item_biases[j]
+          
+          # ensure new values are within valid ratings bounds
+          if (movies_1[i,j] > 5) movies_1[i,j] <- 5
+          if (movies_1[i,j] < 0) movies_1[i,j] <- 0
+    } # end if
+    
+  } # end for j
+} # end for i
+
+```
+
+
+```{r}
+summary(as.vector(as.matrix(movies_1)))
+
+
+```
+
+
+```{r}
+
+summary(user_biases)
+
+
+```
+
+```{r}
+
+summary(item_biases)
+
+
+```
+
+We handled the missing values and now we can start calculating the SVD.
+
+
+```{r}
+
+rank <- qr(as.matrix(movies_1))$rank
+rank
+
+
+```
+
+The matrix has 332 columns, our subset matrix is 358x332. Referencing the earlier approach of $R=PAQ^{T}$ .
+
+* Matrix P will be 358 * 332 
+
+* Matrix A will be 332 * 332 
+
+* Matrix Q will be 332 * 332
+
+
+Calculating the SVD.
+
+
+```{r}
+# calculate svd
+movies_1_svd <- svd(as.matrix(movies_1))
+
+```
+
+```{r}
+
+plot(movies_1_svd$d)
+
+```
+
+The singular values are low throughout the 0 to 300. 
+
+## Dimensionality Reduction
+
+Singular value decompoisition allows an exact representation of any matrix, and also allows us to eliminate the less importatn features that representation to produce an approximate representation with any desired number of dimensions. The fewer the dimensions we choose, the less accurate will be the approximation. Let's say we have a huge matrix R with its components P, A and Q. They are all large. The best way to reduce the dimensionality of the three matrices would be to set the smallest of the singular values to zero. If we sent the smallest singular values to 0, then we can also eliminate the corresponding columns of P and Q. We can sum the squares of each singular value and then identify the first $k$ singular values within matrix A. Based on the singular values plotted, we can see that it will around the start of the singular values. 
+
+```{r}
+# sum of squares of all singular values
+sum_squares <- sum(movies_1_svd$d^2)
+sum_squares
+
+```
+
+
+```{r}
+#checksum of squares for singular values
+perc_vec <- NULL
+for (i in 1:length(movies_1_svd$d)) {
+  perc_vec[i] <- sum(movies_1_svd$d[1:i]^2) / sum_squares
+}
+plot(perc_vec)
+
+```
+
+```{r}
+
+k <- length(perc_vec[perc_vec <= .99])
+k
+
+```
+
+We can see that first 64 singular values whose squares sum to at least 99% of the total of the sum of squares of all the singular values. Let's calculate our $PRQ_{T}$ matrices.
+
+
+
+```{r}
+# calculate size of A matrix
+A_k <- Diagonal(x = movies_1_svd$d[1:k])
+
+
+```
+
+```{r}
+#calculate P matrix
+P_k <- movies_1_svd$u[, 1:k]
+
+```
+
+
+
+```{r}
+#calculate V matrix (transpose of V matrix)
+Q_k <- t(movies_1_svd$v)[1:k,]
+
+
+```
+
+
+```{r}
+#product of all these matrices will give us the estimated matrix
+predicted <- P_k %*% A_k %*% Q_k
+
+```
+
+```{r}
+predicted[0:5]
+
+
+```
+
+We see the values are higher than 5. Let's set all the ratings within 0 and 5.
+
+```{r}
+
+# set all vals > 0 to 5
+predicted[,][predicted[,] > 5] <- 5
+
+# set all vals < -10 to -10
+predicted[,][predicted[,] < 0] <- 0
+
+```
+
+
+```{r}
+predicted[0:5]
+
+
+```
+
+```{r}
+
+predicted_matrix <- as.matrix(predicted)
+
+```
+
+
+
+# Model Development Approach 2
+
+## Single Value Decomposition - Recommender Package - 
+
+As a second approach, we are going implement single value decompposition to the MovieLens Dataset in a different way where we will use recommenderlab package. In our first approach, we created our matrix, handled missing values and calculated each matrix and further calculated the predicted matrix with the product of all three matrices. $R=PAQ^{T}$ . In this approach, we are going to convert our Movie Lense matrix into "realRatingMatrix" and further implement SVD.
+
+```{r}
+# create the matrix
+movie_lense_matrix_2 <- as(as.matrix(movie_lense_matrix), "realRatingMatrix")
+# subset the data
+# subset the dataset
+movies_2 <- movie_lense_matrix_2[rowCounts(MovieLense) > 100, colCounts(MovieLense) > 100]
+
+```
+
+```{r}
+# create the svd model
+model_svd <- Recommender(movies_2, method="SVD", parameter=list(k=64))
+
+```
+
+```{r}
+
+predicted_svd <- predict(model_svd, newdata=movies_2, type="ratings")
+
+```
+
+
+```{r}
+predicted_svd[0:5,]
+
+```
+
+# Conclusion
+
+Based on our two Single Value Decomposition methods we created, we can see that basic matrix factorizational model using SVD can be proper way of creating recommenders system. It is scalable however it is important to handle the missing values properly. 
+
+## References:
+
+
+(Reference: https://www.coursera.org/lecture/matrix-factorization/singular-value-decomposition-K5NBy )
+
+(Reference: https://datajobs.com/data-science-repo/Recommender-Systems-%5BNetflix%5D.pdf )
+
+(Reference: Mining of Massive Data Sets - 11.3 Signular-Value Decomposition)
+
+
+
