@@ -1,0 +1,47 @@
+---
+title: "Algorithmic Discrimination - Bias in Recommender Sysmtes"
+author: "Anil Akyildirim"
+date: "6/24/2020"
+output: html_document
+---
+
+
+# Biases in Recommender systems and Algorithmic Discrimination
+
+Before we start giving examples on Bias and Algorithmic Discrimination, let's define what Bias is. Based on Dr. Baeza-Yates (CTO of NTENT), we can categorize Bias in three categories. 
+
+1) Statistical bias where there is a significant systematic deviation from prior distribution. 
+
+2) Cultural bias where interpretations and judgements are acquired through life. 
+
+3) Cognitive bias where there is systematic pattern of deviation from the norm in judgement. 
+
+The cultural bias is pretty straightforward in definition, where distributiion of gender, racial , age or other cultural attributes of a sample set can create the bias. For example, Nokia came up with a phone where it unlocked by recognizing the user's face. However due the distribution and skeweness of the sample data (might be due to the region) the feature did not work if the user was African decent. 
+
+Addition to the cultural bias, there is cognitive bias when measuring bias. Basically, cognitive bias is one type of confirmation bias which is tendency to search, favor or interprent and further recall information in a way that affirms user's earlier beliefs or input. As we all know, most websites or applications are designed for users specially nowadays with many ways to optimize based on personlization. These applications rely on user feedback however the user data is partially biased based on the choices that the application offers. For example on an homepage of this website: https://www.breatheright.com/ . I can only select the menu items and make any action based on what is provided to me. If there are machine learning components on the website such as served content or adds based on certain third party integrations such as Adobe Target, the website is actually creating the bias. (Personaliztion or recommender systems.)
+
+Below is an illustration that became really popular.
+
+![fairness](1.JPG)
+
+**Equality, which assumes that everyone benefits from standing on boxes of the same height. This is the concept of equal treatment.
+
+**Equity, which argues that each kid should get the box that they need to see over the fence. This is the concept of “affirmative action.”
+
+**Justice, which enables all three kids to see the game without boxes because the cause of the inequity (the wooden fence) was addressed. This is the concept of removing the systemic barrier(s).
+
+
+We can say that removing biases doesnt neccessarily mean to just select the right random normaly distributed training set and adjust the models accordingly but also understanding the existing cultural and cognitive biases. SO I dont think it is 100% possible to control unethical targeting or customer segmentation.  
+
+Facebook Ad's allows companies to serve targeted ads based on consumer's historical data. Basically it tracks what people do online (combines with offline data too) and further makes predictions what they can buy in the future and serve the companies that buys FB ads to those people. In 2018, The U.S Department of Housing and Urban Development filed a complaint against Facebook, where they claimed that FB mines extensive user data and segments users based on their chracteristics and further FB ad targeting invite advertisers to express unlawfull user preferences which is discriminatory. These targeted ads were called "dark ads" which are microtargeting users based on the preferences set by the advertiser. We learned these dark ads with the Guardian reported around 60,000 variations of FB ads every day for the President Donald Trump campaign in 2016. With these dark ads, the aim was to lower the voter turnout for Democratic candidate Hillary Clinton. I think the question is when is it ok or how the preferences should be set for targeting content for marketers.
+
+
+# References
+
+https://www.searchenginejournal.com/biases-search-recommender-systems/339319/#close
+
+https://www.ama.org/marketing-news/the-ethics-of-targeting-minorities-with-dark-ads/
+
+
+
+
