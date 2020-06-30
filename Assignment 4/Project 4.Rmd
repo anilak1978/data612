@@ -1,0 +1,834 @@
+---
+title: "Project 4"
+author: 'Team: Anil Akyildirim & Sie Siong Wong'
+date: "6/27/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+theme: lumen
+---
+
+# Introduction
+
+The goal of this project is to practice working with accuracy and other recommender system
+metrics. The task is to implement below items:
+
+  * Compare the accuracy of at least two recommender system algorithms against offline data.
+
+  * Implement support for at least one business or user experience goal such as increased
+    serendipity, novelty, or diversity.
+
+  * Compare and report on any change in accuracy. 
+  
+  * In conclusion, discuss one or more additional experiments that could be performed and/or          metrics that could be evaluated only if online evaluation was possible. Also, briefly propose     how to design a reasonable online evaluation environment.
+
+
+# Load R Packages
+
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+
+# Load required packages
+library(tidyverse)
+library(recommenderlab)
+library(psych)
+library(reshape2)
+library(ggpubr)
+library(purrr)
+
+```
+
+
+# Load Data
+
+Both the movies and ratings datasets are taken from https://grouplens.org/datasets/movielens/latest/. There are two versions of these datasets. The small datasets are chosen due to limited computing power available on my laptop. 
+
+```{r, eval=TRUE}
+
+# Load movies and ratings datasets
+movies <- read.csv("https://raw.githubusercontent.com/SieSiongWong/DATA-612/master/movies.csv")
+
+ratings <- read.csv("https://raw.githubusercontent.com/SieSiongWong/DATA-612/master/ratings.csv")
+
+head(movies)
+head(ratings)
+
+```
+
+
+# Data Exploration & Preprocessing
+
+## Statistic Summary
+
+The movies dataset contain 3 columns and 9742 observations. The ratings dataset contain 4 columns and 100,836 observations.
+
+We can see that the mean of the rating variable is at 3.5 and the standard deviation is 1.04 and the distribution is left skewed a little.
+
+```{r, eval=TRUE}
+
+# Summary of movies and ratings datasets
+str(movies)
+str(ratings)
+
+# Statistical summary of rating variable
+describe(ratings$rating)
+
+```
+
+## Matrix Conversion
+
+First of all, we have to convert the raw dataset into matrix format that can be used for building recommendation systems through the recommenderlab package.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Convert to rating matrix
+ratings_matrix <- dcast(ratings, userId~movieId, value.var = "rating", na.rm = FALSE)
+  
+# remove userid column
+ratings_matrix <- as.matrix(ratings_matrix[,-1])
+  
+# Convert rating matrix into a recommenderlab sparse matrix
+ratings_matrix <- as(ratings_matrix, "realRatingMatrix")
+
+ratings_matrix
+
+```
+
+Each row of the ratings_matrix corresponds to a user, and each column corresponds to a movie id. There are more than 610 x 9724 = 5,931,640 combinations between a user and a movie id. So, it requires 5,931,640 cells to build the matrix. As we know that not every user has watched every movie. There are only 100,836 observations, so this matrix is sparse.
+
+## Exploring the Values of the Rating
+
+```{r, eval=TRUE}
+
+# Convert the ratings matrix into a vector
+vec_ratings <- as.vector(ratings_matrix@data)
+
+# Unique ratings
+unique(vec_ratings)
+
+# Count the occurrences for each rating
+table_ratings <- table(vec_ratings)
+
+table_ratings
+
+```
+
+As we know a rating equal to 0 means a missing value in the matrix, so we can remove all of them before building a frequency plot of the ratings to visualize the ratings distribution.
+
+```{r, eval=TRUE}
+
+# Remove zero rating and convert the vector to factor
+vec_ratings <- vec_ratings[vec_ratings != 0] %>% factor()
+
+# Visualize through qplot
+qplot(vec_ratings, fill = I("steelblue")) + 
+  ggtitle("Distribution of the Ratings") + 
+  labs(x = "Ratings")
+
+```
+
+## Explore Most Viewed Movies
+
+```{r, eval=TRUE}
+
+# Search for the top 10 most viewed movies
+most_views <- colCounts(ratings_matrix) %>% melt()
+
+most_views <- tibble::rowid_to_column(most_views, "movieId") %>% 
+  rename(count = value) %>% 
+  merge(movies, by = "movieId") %>% 
+  top_n(count, n = 10)
+
+# Visualize the top 10 most viewed movies
+ggplot(most_views, aes(x = reorder(title, count), y = count, fill = 'lightblue')) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x =element_text(angle = 60, hjust = 1)) + 
+  ggtitle("Top 10 Most Viewed Movies") + 
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+```
+
+## Explore the Average Ratings
+
+```{r, eval=TRUE, message=FALSE}
+
+# Average rating for each movie
+avg_ratings_mv <- colMeans(ratings_matrix)
+
+# Average rating for each user
+avg_ratings_us <- rowMeans(ratings_matrix)
+
+# Visualize the distribution of the average movie rating
+avg1 <- qplot(avg_ratings_mv) + 
+  stat_bin(binwidth = 0.1) +
+  ggtitle("Average Movie Rating Distribution") + 
+  labs(x = 'Average Rating', y = 'Frequency') 
+
+# Visualize the distribution of the average user rating
+avg2 <- qplot(avg_ratings_us) + 
+  stat_bin(binwidth = 0.1) +
+  ggtitle("Average User Rating Distribution") + 
+  labs(x = 'Average Rating', y = 'Frequency') 
+
+figure <- ggarrange(avg1, avg2, ncol = 1, nrow = 2)
+
+figure
+
+```
+
+From both of the plots above, we can see that there are some movies have only few ratings and some users only rated few movies. For building recommendation systems, we don't want take these movies and users into account as these ratings might be biased. To remove these least-watched movies and least-rated users, we can set a threshold of minimum number for example, 50.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Filter users and movies more than 50 
+ratings_matrix <- ratings_matrix[rowCounts(ratings_matrix) > 50, colCounts(ratings_matrix) > 50]
+
+# Average rating for each movie
+avg_ratings_mv2 <- colMeans(ratings_matrix)
+
+# Average rating for each user
+avg_ratings_us2 <- rowMeans(ratings_matrix)
+
+# Visualize the distribution of the average movie rating
+avg3 <- qplot(avg_ratings_mv2) + 
+  stat_bin(binwidth = 0.1) +
+  ggtitle("Average Movie Rating Distribution") + 
+  labs(x = 'Average Rating', y = 'Frequency')
+
+# Visualize the distribution of the average user rating
+avg4 <- qplot(avg_ratings_us2) + 
+  stat_bin(binwidth = 0.1) +
+  ggtitle("Average User Rating Distribution") + 
+  labs(x = 'Average Rating', y = 'Frequency')
+
+figure2 <- ggarrange(avg1, avg2, avg3, avg4, 
+                     labels = c("A", "B", "C", "D"), 
+                     ncol = 2, nrow = 2)
+
+figure2
+
+```
+
+The effect of removing those potential biased ratings to the distribution is obvious. From above figure, we can see that the curve is much narrow and has less variance compared to before. 
+
+# Recommendation Models
+
+## Split Dataset
+
+We will build the recommender models by using the splitting method that randomly assign a predefined proportion of the users to the training set and all others to the test set. For this project, we allocate 80% of the dataset to the training set and 20% to the test set. 10 ratings per user will be given to the recommender to make predictions and the other ratings are held out for computing prediction accuracy.
+
+```{r, eval=TRUE}
+
+evaluation <- evaluationScheme(ratings_matrix, method = "split", train = 0.8, given = 10)
+
+evaluation
+
+train <- getData(evaluation, "train")
+train
+
+test_known <- getData(evaluation, "known")
+test_known
+
+test_unknown <- getData(evaluation, "unknown")
+test_unknown
+
+```
+
+## UBCF
+
+Create a recommender based on User Based Collaborative Filtering (UBCF) and using "Pearson" similarity measure and 50 nearest neighbors.
+
+```{r, eval=TRUE}
+
+set.seed(123)
+
+# Create an user-based CF recommender using training data
+rec_ub <- Recommender(data = train, method = "UBCF", 
+                      parameter = list(method = "pearson", nn = 50))
+
+# Create predictions for the test users using known ratings with type as ratings
+pred_ub_acr <- predict(rec_ub, test_known, type = "ratings")
+
+# Create predictions for the test users using known ratings with type as top n recommendation list
+pred_ub_n <- predict(object = rec_ub, newdata = test_known, n = 10)
+
+```
+
+### Exploring the Recommender Model on the Test Set
+
+Top 10 recommendations for the first user. You may notice that the recommendations is less than 10 movies as some movie id does not exist in movies dataset.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Recommendations for the first user.
+first_user_ub <- pred_ub_n@items[1:1] %>% data.frame()
+colnames(first_user_ub) <- c("movieId")
+first_user_ub <- first_user_ub %>%
+  merge(movies, by = "movieId") %>% 
+  select(-movieId)
+
+first_user_ub
+
+```
+
+Distribution of the number of recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Define a matrix with the recommendations to the test set users
+rec_matrix <- as.matrix(data.frame(pred_ub_n@items))
+
+# Define a vector with all recommendations
+num_of_items <- factor(table(rec_matrix))
+
+# Visualize the distribution of the number of recommended movies
+qplot(num_of_items) + ggtitle("Distribution of the Number of Recommended Movies") + labs(x = "Number of Count")
+
+```
+
+Top 10 most recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Top 10 most recommended movies
+top10_ub <- num_of_items %>% data.frame()
+top10_ub <- cbind(movieId = rownames(top10_ub), top10_ub)
+rownames(top10_ub) <- 1:nrow(top10_ub)
+colnames(top10_ub)[2] <- "count"
+top10_ub <- top10_ub %>% 
+  mutate_if(is.factor, ~ as.integer(levels(.x))[.x]) %>%
+  merge(movies, by = "movieId") %>%
+  top_n(count, n = 10)
+
+top10_ub <- top10_ub[order(top10_ub$count, decreasing = TRUE),] %>% 
+  select(title:genres)
+
+top10_ub
+
+```
+
+## SVDF
+
+Create a recommender based on Funk SVD (SVDF) with stochastic gradient descend and using 10 number of features (rank of approximation).
+
+```{r, eval=TRUE}
+
+set.seed(456)
+
+# Create an item-based CF recommender using training data
+rec_svdf <- Recommender(data = train, method = "SVDF",
+                        parameter = list(k = 10))
+
+# Create predictions for the test items using known ratings with type as ratings
+pred_svdf_acr <- predict(object = rec_svdf, newdata = test_known, type = "ratings")
+
+# Create predictions for the test items using known ratings with type as top n recommendation list
+pred_svdf_n <- predict(object = rec_svdf, newdata = test_known, n = 10)
+
+```
+
+### Exploring the Recommender Model on the Test Set
+
+Top 10 recommendations for the first user. You may notice that the recommendations is less than 10 movies as some movie id does not exist in movies dataset.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Recommendations for the first user.
+first_user_svdf <- pred_svdf_n@items[1:1] %>% data.frame()
+colnames(first_user_svdf) <- c("movieId")
+first_user_svdf <- first_user_svdf %>%
+  merge(movies, by = "movieId") %>% 
+  select(-movieId)
+
+first_user_svdf
+
+```
+
+Distribution of the number of recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Define a matrix with the recommendations to the test set users
+rec_matrix <- as.matrix(data.frame(pred_svdf_n@items))
+
+# Define a vector with all recommendations
+num_of_items <- factor(table(rec_matrix))
+
+# Visualize the distribution of the number of recommended movies
+qplot(num_of_items) + ggtitle("Distribution of the Number of Recommended Movies") + labs(x = "Number of Count")
+
+```
+
+Top 10 most recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Top 10 most recommended movies
+top10_svdf <- num_of_items %>% data.frame()
+top10_svdf <- cbind(movieId = rownames(top10_svdf), top10_svdf)
+rownames(top10_svdf) <- 1:nrow(top10_svdf)
+colnames(top10_svdf)[2] <- "count"
+top10_svdf <- top10_svdf %>% 
+  mutate_if(is.factor, ~ as.integer(levels(.x))[.x]) %>%
+  merge(movies, by = "movieId") %>%
+  top_n(count, n = 10)
+
+top10_svdf <- top10_svdf[order(top10_svdf$count, decreasing = TRUE),] %>% 
+  select(title:genres)
+
+top10_svdf
+
+```
+
+## Hybrid Recommender
+
+Use hybrid recommender method from the Recommenderlab package to diversify recommendations.
+
+### UBCF-Popular
+
+Let's combine the UBCF and popular recommender algorithms with popular to diversify recommendations. The weights assigned to the UBCF and Popular are 0.5 and 0.5 respectively. 
+
+```{r, eval=TRUE}
+
+set.seed(789)
+
+# Create an hybrid recommender using training data
+rec_hyb_ubpp <- HybridRecommender(
+                          Recommender(data = train, method = "UBCF", 
+                                      parameter = list(method = "pearson", nn = 50)),
+                          Recommender(data = train, method = "POPULAR"),
+                          weights = c(0.5, 0.5)
+                                  )
+
+# Create predictions for the test items using known ratings with type as ratings
+pred_hyb_ubpp_acr <- predict(object = rec_hyb_ubpp, newdata = test_known, type = "ratings")
+
+# Create predictions for the test items using known ratings with type as top n recommendation list
+pred_hyb_ubpp_n <- predict(object = rec_hyb_ubpp, newdata = test_known, n = 10)
+
+```
+
+#### Exploring the Recommender Model on the Test Set
+
+Top 10 recommendations for the first user. You may notice that the recommendations is less than 10 movies as some movie id does not exist in movies dataset.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Recommendations for the first user.
+first_user_ubpp <- pred_hyb_ubpp_n@items[1:1] %>% data.frame()
+colnames(first_user_ubpp) <- c("movieId")
+first_user_ubpp <- first_user_ubpp %>%
+  merge(movies, by = "movieId") %>% 
+  select(-movieId)
+
+first_user_ubpp
+
+```
+
+Distribution of the number of recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Define a matrix with the recommendations to the test set users
+rec_matrix <- as.matrix(data.frame(pred_hyb_ubpp_n@items))
+
+# Define a vector with all recommendations
+num_of_items <- factor(table(rec_matrix))
+
+# Visualize the distribution of the number of recommended movies
+qplot(num_of_items) + ggtitle("Distribution of the Number of Recommended Movies") + labs(x = "Number of Count")
+
+```
+
+Top 10 most recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Top 10 most recommended movies
+top10_ubpp <- num_of_items %>% data.frame()
+top10_ubpp <- cbind(movieId = rownames(top10_ubpp), top10_ubpp)
+rownames(top10_ubpp) <- 1:nrow(top10_ubpp)
+colnames(top10_ubpp)[2] <- "count"
+top10_ubpp <- top10_ubpp %>% 
+  mutate_if(is.factor, ~ as.integer(levels(.x))[.x]) %>%
+  merge(movies, by = "movieId") %>%
+  top_n(count, n = 10)
+
+top10_ubpp <- top10_ubpp[order(top10_ubpp$count, decreasing = TRUE),] %>% 
+  select(title:genres)
+
+top10_ubpp
+
+```
+
+### SVDF-Popular
+
+Let's combine the SVDF and popular recommender algorithms with popular to diversify recommendations. The weights assigned to the SVDF and Popular are 0.5 and 0.5 respectively. 
+
+```{r, eval=TRUE}
+
+set.seed(321)
+
+# Create an hybrid recommender using training data
+rec_hyb_svpp <- HybridRecommender(
+                          Recommender(data = train, method = "SVDF", 
+                                      parameter = list(k = 10)),
+                          Recommender(data = train, method = "POPULAR"),
+                          weights = c(0.5, 0.5)
+                                  )
+
+# Create predictions for the test items using known ratings with type as ratings
+pred_hyb_svpp_acr <- predict(object = rec_hyb_svpp, newdata = test_known, type = "ratings")
+
+# Create predictions for the test items using known ratings with type as top n recommendation list
+pred_hyb_svpp_n <- predict(object = rec_hyb_svpp, newdata = test_known, n = 10)
+
+```
+
+#### Exploring the Recommender Model on the Test Set
+
+Top 10 recommendations for the first user. You may notice that the recommendations is less than 10 movies as some movie id does not exist in movies dataset.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Recommendations for the first user.
+first_user_svpp <- pred_hyb_svpp_n@items[1:1] %>% data.frame()
+colnames(first_user_svpp) <- c("movieId")
+first_user_svpp <- first_user_svpp %>%
+  merge(movies, by = "movieId") %>% 
+  select(-movieId)
+
+first_user_svpp
+
+```
+
+Distribution of the number of recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Define a matrix with the recommendations to the test set users
+rec_matrix <- as.matrix(data.frame(pred_hyb_svpp_n@items))
+
+# Define a vector with all recommendations
+num_of_items <- factor(table(rec_matrix))
+
+# Visualize the distribution of the number of recommended movies
+qplot(num_of_items) + ggtitle("Distribution of the Number of Recommended Movies") + labs(x = "Number of Count")
+
+```
+
+Top 10 most recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Top 10 most recommended movies
+top10_svpp <- num_of_items %>% data.frame()
+top10_svpp <- cbind(movieId = rownames(top10_svpp), top10_svpp)
+rownames(top10_svpp) <- 1:nrow(top10_svpp)
+colnames(top10_svpp)[2] <- "count"
+top10_svpp <- top10_svpp %>% 
+  mutate_if(is.factor, ~ as.integer(levels(.x))[.x]) %>%
+  merge(movies, by = "movieId") %>%
+  top_n(count, n = 10)
+
+top10_svpp <- top10_svpp[order(top10_svpp$count, decreasing = TRUE),] %>% 
+  select(title:genres)
+
+top10_svpp
+
+```
+
+### UBCF-Random-Popular
+
+Let's combine the UBCF, Random and Popular recommender algorithms to further diversify recommendations. The weights assigned to the UBCF, Random, and Popular are 0.2, 0.3, and 0.5 respectively. 
+
+```{r, eval=TRUE}
+
+set.seed(654)
+
+# Create an hybrid recommender using training data
+rec_hyb_ubrrpp <- HybridRecommender(
+                          Recommender(data = train, method = "UBCF", 
+                                      parameter = list(method = "pearson", nn = 50)),
+                          Recommender(data = train, method = "RANDOM"),
+                          Recommender(data = train, method = "POPULAR"),
+                          weights = c(0.2, 0.3, 0.5)
+                                    )
+
+# Create predictions for the test items using known ratings with type as ratings
+pred_hyb_ubrrpp_acr <- predict(object = rec_hyb_ubrrpp, newdata = test_known, type = "ratings")
+
+# Create predictions for the test items using known ratings with type as top n recommendation list
+pred_hyb_ubrrpp_n <- predict(object = rec_hyb_ubrrpp, newdata = test_known, n = 10)
+
+```
+
+#### Exploring the Recommender Model on the Test Set
+
+Top 10 recommendations for the first user. You may notice that the recommendations is less than 10 movies as some movie id does not exist in movies dataset.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Recommendations for the first user.
+first_user_ubrrpp <- pred_hyb_ubrrpp_n@items[1:1] %>% data.frame()
+colnames(first_user_ubrrpp) <- c("movieId")
+first_user_ubrrpp <- first_user_ubrrpp %>%
+  merge(movies, by = "movieId") %>% 
+  select(-movieId)
+
+first_user_ubrrpp
+
+```
+
+Distribution of the number of recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Define a matrix with the recommendations to the test set users
+rec_matrix <- as.matrix(data.frame(pred_hyb_ubrrpp_n@items))
+
+# Define a vector with all recommendations
+num_of_items <- factor(table(rec_matrix))
+
+# Visualize the distribution of the number of recommended movies
+qplot(num_of_items) + ggtitle("Distribution of the Number of Recommended Movies") + labs(x = "Number of Count")
+
+```
+
+Top 10 most recommended movies
+
+```{r, eval=TRUE, message=FALSE}
+
+# Top 10 most recommended movies
+top10_ubrrpp <- num_of_items %>% data.frame()
+top10_ubrrpp <- cbind(movieId = rownames(top10_ubrrpp), top10_ubrrpp)
+rownames(top10_ubrrpp) <- 1:nrow(top10_ubrrpp)
+colnames(top10_ubrrpp)[2] <- "count"
+top10_ubrrpp <- top10_ubrrpp %>% 
+  mutate_if(is.factor, ~ as.integer(levels(.x))[.x]) %>%
+  merge(movies, by = "movieId") %>%
+  top_n(count, n = 10)
+
+top10_ubrrpp <- top10_ubrrpp[order(top10_ubrrpp$count, decreasing = TRUE),] %>% 
+  select(title:genres)
+
+top10_ubrrpp
+
+```
+
+
+# Evaluate & Compare
+
+## Evaluate the Accuracy
+
+Evaluate the accuracy based on ratings of UBCF, Funk SVD, Hybrid(UBCF, Popular), Hybrid(SVDF, Popular), Hybrid(UBCF, Random, Popular) recommenders on unknown ratings.
+
+```{r, eval=TRUE}
+
+# Evaluate the User Based CF recommendations on unknown ratings
+acr_ubcf <- calcPredictionAccuracy(pred_ub_acr, test_unknown)
+
+# Evaluate the Funk SVD recommendations on unknown ratings
+acr_svdf <- calcPredictionAccuracy(pred_svdf_acr, test_unknown)
+
+# Evaluate the Hybrid(UBCF, Popular) recommendations on unknown ratings
+acr_hyb_ubpp <- calcPredictionAccuracy(pred_hyb_ubpp_acr, test_unknown)
+
+# Evaluate the Hybrid(SVDF, Popular) recommendations on unknown ratings
+acr_hyb_svpp <- calcPredictionAccuracy(pred_hyb_svpp_acr, test_unknown)
+
+# Evaluate the Hybrid(UBCF, Random, Popular) recommendations on unknown ratings
+acr_hyb_ubrrpp <- calcPredictionAccuracy(pred_hyb_ubrrpp_acr, test_unknown)
+
+# Combine accuracy measurement for all recommenders
+acr <- rbind(UBCF = acr_ubcf, SVDF = acr_svdf, HYB_UBPP = acr_hyb_ubpp, HYB_SVPP = acr_hyb_svpp, HYB_UBRRPP = acr_hyb_ubrrpp)
+
+acr
+
+```
+
+Evaluate the accuracy using k-fold method based on Top N List of UBCF, Funk SVD, Hybrid(UBCF, Popular), Hybrid(SVDF, Popular), Hybrid(UBCF, Random, Popular) recommenders on unknown ratings.
+
+```{r, eval=TRUE}
+
+set.seed(313)
+
+evaluation_2 <- evaluationScheme(ratings_matrix, 
+                                 method     = "cross", 
+                                 k          = 5, 
+                                 train      = 0.8, 
+                                 given      = 10,
+                                 goodRating = 3
+                                 )
+
+n = c(1, 3, 5, 10, 15, 20)
+
+# Getting precision, recall, TPR, FPR for UBCF
+df_ubcf <- c()
+df_svdf <- c()
+df_hyb_ubpp <- c()
+df_hyb_svpp <- c()
+df_hyb_ubrrpp <- c()
+
+for (i in n) {
+
+  # Getting precision, recall, TPR, FPR for UBCF
+  rec_ub <- Recommender(data = getData(evaluation_2, "train"), 
+                        method = "UBCF", 
+                        parameter = list(method = "pearson", nn = 50))
+  prd_ubcf <- predict(object = rec_ub, newdata = getData(evaluation_2, "known"), n = i)
+  acr_ubcf <- calcPredictionAccuracy(prd_ubcf, getData(evaluation_2, "unknown"), 
+                                     given = 10, 
+                                     goodRating = 3)
+  df_ubcf <- cbind(acr_ubcf, df_ubcf)
+  
+  # Getting precision, recall, TPR, FPR for SVDF
+  rec_svdf <- Recommender(data = getData(evaluation_2, "train"), 
+                          method = "SVDF",
+                          parameter = list(k = 10))
+  prd_svdf <- predict(object = rec_svdf, newdata = getData(evaluation_2, "known"), n = i)
+  acr_svdf <- calcPredictionAccuracy(prd_svdf, getData(evaluation_2, "unknown"), 
+                                     given = 10, 
+                                     goodRating = 3)
+  df_svdf <- cbind(acr_svdf, df_svdf)
+  
+  # Getting precision, recall, TPR, FPR for Hybrid(UBCF, Popular)
+  rec_hyb_ubpp <- HybridRecommender(
+                                    Recommender(data = getData(evaluation_2, "train"), 
+                                                method = "UBCF", 
+                                    parameter = list(method = "pearson", nn = 50)),
+                                    Recommender(data = getData(evaluation_2, "train"), 
+                                                method = "POPULAR"),
+                                    weights = c(0.5, 0.5)
+                                    )
+  prd_hyb_ubpp <- predict(object = rec_hyb_ubpp, newdata = getData(evaluation_2, "known"), n = i)
+  acr_hyb_ubpp <- calcPredictionAccuracy(prd_hyb_ubpp, getData(evaluation_2, "unknown"), 
+                                     given = 10, 
+                                     goodRating = 3)
+  df_hyb_ubpp <- cbind(acr_hyb_ubpp, df_hyb_ubpp)
+  
+  # Getting precision, recall, TPR, FPR for Hybrid(SVDF, Popular)
+  rec_hyb_svpp <- HybridRecommender(
+                                    Recommender(data = getData(evaluation_2, "train"), 
+                                                method = "SVDF", 
+                                    parameter = list(k = 10)),
+                                    Recommender(data = getData(evaluation_2, "train"), 
+                                                method = "POPULAR"),
+                                    weights = c(0.5, 0.5)
+                                    )
+  prd_hyb_svpp <- predict(object = rec_hyb_svpp, newdata = getData(evaluation_2, "known"), n = i)
+  acr_hyb_svpp <- calcPredictionAccuracy(prd_hyb_svpp, getData(evaluation_2, "unknown"), 
+                                     given = 10, 
+                                     goodRating = 3)
+  df_hyb_svpp <- cbind(acr_hyb_svpp, df_hyb_svpp)
+  
+  # Getting precision, recall, TPR, FPR for Hybrid(UBCF, Random, Popular)
+  rec_hyb_ubrrpp <- HybridRecommender(
+                                      Recommender(data = getData(evaluation_2, "train"), 
+                                                  method = "UBCF", 
+                                      parameter = list(method = "pearson", nn = 50)),
+                                      Recommender(data = getData(evaluation_2, "train"), 
+                                                  method = "RANDOM"),
+                                      Recommender(data = getData(evaluation_2, "train"), 
+                                                  method = "POPULAR"),
+                                      weights = c(0.2, 0.3, 0.5)
+                                      )
+  prd_hyb_ubrrpp <- predict(object = rec_hyb_ubrrpp, newdata = getData(evaluation_2, "known"), 
+                            n = i)
+  acr_hyb_ubrrpp <- calcPredictionAccuracy(prd_hyb_ubrrpp, getData(evaluation_2, "unknown"), 
+                                       given = 10, 
+                                       goodRating = 3)
+  df_hyb_ubrrpp <- cbind(acr_hyb_ubrrpp, df_hyb_ubrrpp)
+  
+            }
+
+# Convert to a dataframe, UBCF
+df_ubcf <- as.data.frame(t(as.matrix(df_ubcf)))
+df_ubcf$n <- rev(n)
+df_ubcf$name <- "UBCF"
+rownames(df_ubcf) <- 1:nrow(df_ubcf)
+
+# Convert to a dataframe, SVDF
+df_svdf <- as.data.frame(t(as.matrix(df_svdf)))
+df_svdf$n <- rev(n)
+df_svdf$name <- "SVDF"
+rownames(df_svdf) <- 1:nrow(df_svdf)
+
+# Convert to a dataframe, Hybrid(UBCF, Popular)
+df_hyb_ubpp <- as.data.frame(t(as.matrix(df_hyb_ubpp)))
+df_hyb_ubpp$n <- rev(n)
+df_hyb_ubpp$name <- "Hybrid_UBPP"
+rownames(df_hyb_ubpp) <- 1:nrow(df_hyb_ubpp)
+
+# Convert to a dataframe, Hybrid(SVDF, Popular)
+df_hyb_svpp <- as.data.frame(t(as.matrix(df_hyb_svpp)))
+df_hyb_svpp$n <- rev(n)
+df_hyb_svpp$name <- "Hybrid_SVPP"
+rownames(df_hyb_svpp) <- 1:nrow(df_hyb_svpp)
+
+# Convert to a dataframe, Hybrid(UBCF, Random, Popular)
+df_hyb_ubrrpp <- as.data.frame(t(as.matrix(df_hyb_ubrrpp)))
+df_hyb_ubrrpp$n <- rev(n)
+df_hyb_ubrrpp$name <- "Hybrid_UBRRPP"
+rownames(df_hyb_ubrrpp) <- 1:nrow(df_hyb_ubrrpp)
+
+# Merge all dataframes into a single one for visualizing
+df_all <- Reduce(function(df1, df2) 
+  merge(df1, df2,  all = TRUE), 
+  list(df_ubcf, df_svdf, df_hyb_ubpp, df_hyb_svpp, df_hyb_ubrrpp)) %>% 
+  select(c(name, n, precision, recall, TPR, FPR, -TP, -FP, -FN, -TN)) 
+
+# Plot ROC curves for each model
+df_all %>%
+  ggplot(aes(FPR, TPR, color = fct_reorder2(as.factor(name), FPR, TPR))) +
+  geom_line() +
+  geom_label(aes(label = n))  +
+  labs(title = "ROC Curves", color = "Model") +
+  theme_grey(base_size = 14)
+
+# Plot Precision-Recall curves for each model
+df_all %>%
+  ggplot(aes(recall, precision, color = fct_reorder2(as.factor(name), recall, precision))) +
+  geom_line() +
+  geom_label(aes(label = n))  +
+  labs(title = "Precision-Recall Curves", colour = "Model") +
+  theme_grey(base_size = 14)
+
+```
+
+
+# Summary and Conclusion
+
+We can see that the diversity of movies recommended to the first user has been increased when combine with the Popular algorithm and even more diversified when combine with both Popular and Random algorithms. This happens the same to the top 10 most recommended movies.
+
+From the evaluation results, we can see that increase the diversity by adding popular algorithm to both of User-Based CF and Funk SVD models, decrease the RMSE. But, we can clearly see from the ROC curves that the UBCF model achieves higher True Positive Rate (TPR) for any given level of False Negative Rate (FPR) and has the highest area under the curve (AUC). While the AUC for both SVDF and hybrid models about the same in this case. The higher the AUC, the higher number of relevant recommendations (true positives) for the same level of non-relevant recommendations (false positives) is produced. In addition to that, the UBCF model also has the highest AUC in Precision-Recall curves and achieves higher Precision for any given level of Recall. Also, we can see the SVDF model has higher AUC than the hybrid model. You notice that the values of Recall is smaller than the Precision values. This low recall and high precision means that the SVDF model is only returning few relevant recommendations but highly accurate.   
+
+The recommender systems can be evaluated offline or online. The idea of creating these recommender systems is to evaluate and use them in production setting. Offline evaluations test the effectiveness of the system on a certain dataset in this case MovieLens dataset, online evaluation attempts to evaluate the system with a method called A/B Testing where we have two different recommender system and part of the users are served with these two different recommender systems separately. Based on certain metrics such as CTR(Click Through Rate), and with the assumption of certain factors are comparable between the two recommender systems (latency and complexity), whichever recommender system has better score would get chosen to be used in production.  Offline evaluations are easier and reproducible; however, since the recommender system we deploy will live online performance of the selected recommender system may not be as good as expected. 
+
+As an example, with online evaluation, let's say we would deploy UBCF recommender system to production and serve group of users "A", and then we deploy SVDF system to production at the same time and serve to group of users "B", we can further look at the Click Through Rate of suggested movies for users, the user behavior of such as the parts of the user interface they visit to (for example, if the recommender system is deployed in production for an app, see if users are going to the description section for the suggested movies, or if they are watching the preview trailer of the movie or if they are directly starting the stream of the movie and etc...). One important part of the online evaluation is that the Group A and B should not be segmented based on a target audience in order to evaluate the recommender systems. With offline evaluation, we are looking at the certain measures such as RMSE, ROC Curve and overall looking for accuracy; however, with online recommendation we are able to see how the recommender engine works with the app or product it is deployed to. 
+
+In terms of designing an online evaluation environment, we can follow the below steps:
+
+  * Out of the total population, create a random sample set of Group A and Group B
+
+  * Deploy Model UBCF to production with the Product (Webapp, app and etc...) and serve to sample     Group A
+
+  * Deploy Model SVDF to production with the Product (Webapp, app and etc...) and serve to sample     Group B
+
+  * Review Metrics such as CTR, User Journey and Interaction, latency, performance, cost of the       recommender engine in production for both Models.
+
+  * Create Evaluation based on user retention, click through rate and final ratings based on            recommendations provided by the system. 
+
+At the end of the day, from a business perspective, we are looking at how the product that has the recommender system works and if it is efficient in terms of usability rather than just accuracy of the model.
+
+   
+# Reference
+
+Gorakala, K.G. & Usuelli, M. (2015, Sept). Building a Recommendation System with R (pp. 50-92). Packt Publishing Ltd.
+
+Hashler, M. & Vereet, B. (2019, Aug 27). Package ‘recommenderlab’. CRAN. Retrieved from https://cran.r-project.org/web/packages/recommenderlab/recommenderlab.pdf.
+
+Gebremeskel, G.G. & Vries, A.P. (2016). Recommender System Evaluations: Offline, Online, Time and A/A Test. CEUR Workshop Proceedings. Retrieved from http://ceur-ws.org/Vol-1609/16090642.pdf.
+
+
