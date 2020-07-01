@@ -1,0 +1,29 @@
+---
+title: "Final Project Proposal"
+author: 'Team: Anil Akyildirim & Sie Siong Wong'
+date: "6/27/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+theme: lumen
+---
+
+# Introduction
+
+In our final project, we are going to continue to use the MovieLens dataset. We have implemented User to User and Item to Item Collaborative Filtering and Matrix Factrorization Singlular Valur Decomposition(SVD) methods for Recommenders System. With the Final Project, we will extract additional data and add implementation of Content Based Recommender System. WWe will continue to create most popular methods such as UBCF, IBCF, SVD, ALS or hybrid between these methods. We can further compare all the recommender systems we have created and pick the one that performs the best. 
+
+As a brief overview of the additional Recommender System we will build for the Final Project; Content Based Recommender's System will recommend items to customer "X", similar items that is rated as by customer "X". In order to do this, we are going to create "Description Based Recommender" and Genres and Keywords Based Recommender. With description based recommender, we are going to build a system that recommends movies that are similar to a particular movie highly rated by customer "X". The idea is to compute pairwise "cosine" similarity scores for all movies based on their descriptions and recommend movies based on that similar score threshold. With genres and keyword based recommender system, we are going to build the system based on a metadata that we define wheter this is actors, directors , genres or keywords for the movie description.
+
+# About the Data
+
+The MovieLens dataset is publicly available (https://grouplens.org/datasets/movielens/latest/ or https://www.kaggle.com/rounakbanik/the-movies-dataset/data ) and changes overtime as grouplens makes it available. Small dataset is available for 100,000 ratings, 3,600 tag applied to 9,000 movies by 600 users. The full dataset has 27,000,000 ratings and 1,100,000 tag applications applied to 58,000 movies by 280,000 users. This includes tag genome data with 14 million relevance scores across 1,100 tags. As part of the goal of the assignment, we will choose  a large dataset and attempt to use Spark and make sure the Recommender System we create works. 
+
+# Process
+
+In the final project, we will include all the Data Science Application Process requirements, from establishing a problem statement based on the goal of the project, data collection, data cleaning, data exploration, defining the recommender system approach, model development, evaluation and conclusion. The data cleaning and transformation phase will include neccessary matrix creation and normalization, data exploration phase will include showing the distribution of variables (ratings), Data preparation will include split the dataset to train and test datasets, model creation will include neccessary model development and prediction and evaluation will include comparing models created with RMSE, MSE, MAE, ROC Curve and Precision Call. 
+
+# Presentation
+
+Our presentation will include the concepts we have developed and learned throughout the class and include the implementation of the recommender system we have build.
