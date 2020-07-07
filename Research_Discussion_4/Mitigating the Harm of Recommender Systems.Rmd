@@ -1,0 +1,17 @@
+---
+title: "Mitigating the Harm of Recommender Systems"
+author: "Anil Akyildirim"
+date: "7/2/2020"
+output: html_document
+---
+
+# Mitigating the Harm of Recommender Systems
+
+About 7-8 years ago, I worked on a project for a mall chain where the objective was to build a digital Holiday Experience for kids in a shopping center. The idea was to build sections of digital and interactive events where kids can go through to meet Santa at the final stage for an Holiday Photo. The project required building a webapp where users can register with their information to enter the area.Just to make the registration and experience more engaging, users were allowed to register with nick names, choose characters, add their bio and image(including their photo if the would like to) which then gets printed on RFID cards as their badge. When we ran the first trial of the registration we noticed a big issue with user generated content. There were many explicit and not kid friendly characters, images and names entered in the database for badge requests. User generated content has always been an interesting issue however with the increasing evalution on platforms such as FB, Youtube, Google and others one might ask if it is time to come up with a different set of process, policies and rules on digital content.
+
+If we think about web analytics and how we can track the entire user journey from clicking a button to users time spend a site or post content, we can say that marketing and advertising norms and ethiques that would not be acceptable 20-30 years ago is becoming the new norm. Companies or organizations can identify each individuals behavior, demographic and serve content based on their objectives. Recommenders Engines that are build within these platforms furthe serves similar content.
+
+FB and Youtube holds vast amount of misinformation created by user generated content including manipulated, altered facts of other user's opinion without any source or reference. There is no easy way of validating the accounts these platforms hold and with the current state of sentiment analysis the content creation can be automated. User generated content creation combined with recommendation engines built in these platforms some organizations or companies can use these platforms for manupulation whether this can be manipulating stock market, politcal views or a consumer to purchase a product. 
+
+Even though there is a great debate and push back on regulization of user generated content, digital ad purchases from platforms such as Facebook, I believe curation and certain policy changes will be required in the short future. In terms of content generation there can be curation process (maybe automated with the current NLP approaches that are available) prior to publishing. I also think, the serve of digital ads should be regulated for the validity of the content, which used to be standard practice for TV ads years ago. Since the recommendation engines are doing what they are built to do and provide great benefit from a consumer or user perspective, I dont think certain concepts such as digital polarization is coming from them, however without regulation of content and ad serving in these platform, recommendation engines becomes a tool for ogranization or companies for harmful objectives.
+
