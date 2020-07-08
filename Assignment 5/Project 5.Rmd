@@ -1,0 +1,407 @@
+---
+title: "Project 5"
+author: 'Team: Anil Akyildirim & Sie Siong Wong'
+date: "7/3/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+theme: lumen
+---
+
+# Introduction
+
+The goal of this project is to practice working with a distributed recommender system in Spark and then compare the performance with a recommender system without Spark. To compare, we will consider the efficiency of the system and the added complexity of using Spark.
+
+# Load R Packages
+
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+
+# Load required packages
+library(recommenderlab)
+library(tidyverse)
+library(sparklyr)
+library(reshape2)
+library(ggpubr)
+library(psych)
+library(purrr)
+library(tictoc)
+
+```
+
+
+# Load Data
+
+Both the movies and ratings datasets are taken from https://grouplens.org/datasets/movielens/latest/. There are two versions of these datasets. The small datasets are chosen due to limited computing power available on my laptop. 
+
+```{r, eval=TRUE}
+
+# Load movies and ratings datasets
+movies <- read.csv("https://raw.githubusercontent.com/SieSiongWong/DATA-612/master/movies.csv")
+
+ratings <- read.csv("https://raw.githubusercontent.com/SieSiongWong/DATA-612/master/ratings.csv")
+
+head(movies)
+head(ratings)
+
+```
+
+# Non-Distributed Recommender System
+
+## Data Exploration & Preparation
+
+### Statistic Summary
+
+The movies dataset contain 3 columns and 9742 observations. The ratings dataset contain 4 columns and 100,836 observations.
+
+We can see that the mean of the rating variable is at 3.5 and the standard deviation is 1.04 and the distribution is left skewed a little.
+
+```{r, eval=TRUE}
+
+# Summary of movies and ratings datasets
+str(movies)
+str(ratings)
+
+# Statistical summary of rating variable
+describe(ratings$rating)
+
+```
+
+## Matrix Conversion
+
+First of all, we have to convert the raw dataset into matrix format that can be used for building recommendation systems through the recommenderlab package.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Convert to rating matrix
+ratings_matrix <- dcast(ratings, userId~movieId, value.var = "rating", na.rm = FALSE)
+  
+# remove userId column
+ratings_matrix <- as.matrix(ratings_matrix[,-1])
+  
+# Convert rating matrix into a recommenderlab sparse matrix
+ratings_matrix <- as(ratings_matrix, "realRatingMatrix")
+
+ratings_matrix
+
+```
+
+Each row of the ratings_matrix corresponds to a user, and each column corresponds to a movie id. There are more than 610 x 9724 = 5,931,640 combinations between a user and a movie id. So, it requires 5,931,640 cells to build the matrix. As we know that not every user has watched every movie. There are only 100,836 observations, so this matrix is sparse.
+
+## Exploring the Values of the Rating
+
+```{r, eval=TRUE}
+
+# Convert the ratings matrix into a vector
+vec_ratings <- as.vector(ratings_matrix@data)
+
+# Unique ratings
+unique(vec_ratings)
+
+# Count the occurrences for each rating
+table_ratings <- table(vec_ratings)
+
+table_ratings
+
+```
+
+As we know a rating equal to 0 means a missing value in the matrix, so we can remove all of them before building a frequency plot of the ratings to visualize the ratings distribution.
+
+```{r, eval=TRUE}
+
+# Remove zero rating and convert the vector to factor
+vec_ratings <- vec_ratings[vec_ratings != 0] %>% factor()
+
+# Visualize through qplot
+qplot(vec_ratings, fill = I("steelblue")) + 
+  ggtitle("Distribution of the Ratings") + 
+  labs(x = "Ratings")
+
+```
+
+## Explore Most Viewed Movies
+
+```{r, eval=TRUE}
+
+# Search for the top 10 most viewed movies
+most_views <- colCounts(ratings_matrix) %>% melt()
+
+most_views <- tibble::rowid_to_column(most_views, "movieId") %>% 
+  rename(count = value) %>% 
+  merge(movies, by = "movieId") %>% 
+  top_n(count, n = 10)
+
+# Visualize the top 10 most viewed movies
+ggplot(most_views, aes(x = reorder(title, count), y = count, fill = 'lightblue')) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x =element_text(angle = 60, hjust = 1)) + 
+  ggtitle("Top 10 Most Viewed Movies") + 
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+```
+
+## Explore the Average Ratings
+
+```{r, eval=TRUE, message=FALSE}
+
+# Average rating for each movie
+avg_ratings_mv <- colMeans(ratings_matrix)
+
+# Average rating for each user
+avg_ratings_us <- rowMeans(ratings_matrix)
+
+# Visualize the distribution of the average movie rating
+avg1 <- qplot(avg_ratings_mv) + 
+  stat_bin(binwidth = 0.1) +
+  ggtitle("Average Movie Rating Distribution") + 
+  labs(x = 'Average Rating', y = 'Frequency') 
+
+# Visualize the distribution of the average user rating
+avg2 <- qplot(avg_ratings_us) + 
+  stat_bin(binwidth = 0.1) +
+  ggtitle("Average User Rating Distribution") + 
+  labs(x = 'Average Rating', y = 'Frequency') 
+
+figure <- ggarrange(avg1, avg2, ncol = 1, nrow = 2)
+
+figure
+
+```
+
+From both of the plots above, we can see that there are some movies have only few ratings and some users only rated few movies. For building recommendation systems, we don't want take these movies and users into account as these ratings might be biased. To remove these least-watched movies and least-rated users, we can set a threshold of minimum number for example, 50.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Filter users and movies more than 50 
+ratings_matrix <- ratings_matrix[rowCounts(ratings_matrix) > 50, colCounts(ratings_matrix) > 50]
+
+# Average rating for each movie
+avg_ratings_mv2 <- colMeans(ratings_matrix)
+
+# Average rating for each user
+avg_ratings_us2 <- rowMeans(ratings_matrix)
+
+# Visualize the distribution of the average movie rating
+avg3 <- qplot(avg_ratings_mv2) + 
+  stat_bin(binwidth = 0.1) +
+  ggtitle("Average Movie Rating Distribution") + 
+  labs(x = 'Average Rating', y = 'Frequency')
+
+# Visualize the distribution of the average user rating
+avg4 <- qplot(avg_ratings_us2) + 
+  stat_bin(binwidth = 0.1) +
+  ggtitle("Average User Rating Distribution") + 
+  labs(x = 'Average Rating', y = 'Frequency')
+
+figure2 <- ggarrange(avg1, avg2, avg3, avg4, 
+                     labels = c("A", "B", "C", "D"), 
+                     ncol = 2, nrow = 2)
+
+figure2
+
+```
+
+The effect of removing those potential biased ratings to the distribution is obvious. From above figure, we can see that the curve is much narrow and has less variance compared to before. 
+
+## Recommenderlab
+
+### Split Dataset
+
+We will build the recommender models by using the splitting method that randomly assign a predefined proportion of the users to the training set and all others to the test set. For this project, we allocate 80% of the dataset to the training set and 20% to the test set. 10 ratings per user will be given to the recommender to make predictions and the other ratings are held out for computing prediction accuracy.
+
+```{r, eval=TRUE}
+
+evaluation <- evaluationScheme(ratings_matrix, method = "split", train = 0.8, given = 10)
+
+evaluation
+
+train <- getData(evaluation, "train")
+train
+
+test_known <- getData(evaluation, "known")
+test_known
+
+test_unknown <- getData(evaluation, "unknown")
+test_unknown
+
+```
+
+### ALS
+
+Create a recommender based on Alternating Least Squares (ALS) method.
+
+```{r, eval=TRUE}
+
+set.seed(123)
+
+# Create an item-based CF recommender using training data
+tic()
+rec_als <- Recommender(data = train, method = "ALS")
+train_time_rec <- toc(quiet = TRUE)
+
+# Create predictions for the test items using known ratings with type as ratings
+tic()
+pred_als_acr <- predict(object = rec_als, newdata = test_known, type = "ratings")
+predict_time_rec <- toc(quiet = TRUE)
+
+# Create predictions for the test items using known ratings with type as top n recommendation list
+tic()
+pred_als_n <- predict(object = rec_als, newdata = test_known, n = 5)
+top_n_time_rec <- toc(quiet = TRUE)
+
+```
+
+
+# Distributed Recommender System
+
+## Spark
+
+### Data Preparation
+
+Based on the data exploration analysis completed above, we can do the same thing here to remove movies that have only few ratings and to remove users who only rated few movies. We don't want take these movies and users into account as these ratings might be biased. To remove these least-watched movies and least-rated users, we can set a threshold of minimum number for example, 50.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Connect to your Spark cluster
+spark_conn <- spark_connect(master = "local")
+
+# Copy ratings matrix to Spark
+ratings_tbl <- copy_to(spark_conn, ratings, overwrite=TRUE)
+
+# Remove timestamp column
+ratings_tbl <- ratings_tbl %>% select(-timestamp)
+
+# Remove least-watched movies and least-rated users less than 50
+ratings_tbl <- ratings_tbl %>% 
+  group_by(userId) %>% 
+  mutate(count = n()) %>% 
+  filter(count > 50)
+ratings_tbl <- ratings_tbl %>% 
+  select(-count) %>% 
+  group_by(movieId) %>% 
+  mutate(count = n()) %>% 
+  filter(count >50)
+ratings_tbl <- ratings_tbl %>% select(-count)
+
+```
+
+### Split Dataset
+
+```{r, eval=TRUE, message=FALSE}
+
+# Split the dataset into training and test set
+partitions <- ratings_tbl %>% sdf_random_split(training = 0.8, test = 0.2, seed = 123)
+
+```
+
+### ALS
+
+```{r, eval=TRUE, message=FALSE}
+
+set.seed(456)
+
+# Train the ALS model
+tic()
+als_model <- ml_als(partitions$training, rating_col = "rating", user_col = "userId", item_col = "movieId")
+train_time_sp <- toc(quiet = TRUE)
+
+# Predict rating using test set
+tic()
+als_pred <- ml_predict(als_model, partitions$test)
+predict_time_sp <- toc(quiet = TRUE)
+
+# Return the top 5 recommendations
+tic()
+als_rec <- ml_recommend(als_model, type = "item", 5) %>% select(-recommendations)
+top_n_time_sp <- toc(quiet =TRUE)
+
+```
+
+
+# Evaluate & Compare
+
+## Evaluate the Accuracy
+
+Evaluate the accuracy based on ratings for the Recommenderlab ALS model and Spark ALS model.
+
+```{r, eval=TRUE, message=FALSE}
+
+# Evaluate the accuracy for the Recommenderlab ALS model
+acr_als <- calcPredictionAccuracy(pred_als_acr, test_unknown)
+
+# Remove NaN values due to dataset splitting in Spark
+als_pred <- als_pred %>% filter(!is.na(prediction)) 
+
+# Evaluate the accuracy for the Spark ALS model
+spark_mae <- als_pred  %>% 
+  mutate(error = abs(rating - prediction)) %>% 
+  summarize(mean(error))
+
+spark_mse <- als_pred  %>% 
+  mutate(error = (rating - prediction)^2) %>% 
+  summarize(mean(error))
+  
+spark_rmse <- als_pred  %>% 
+  mutate(error = (rating - prediction)^2) %>% 
+  summarize(sqrt(mean(error)))
+
+# Combine the RMSE, MSE, and MAE for both models
+acr <- rbind("Recommenderlab ALS" = acr_als, 
+             "Spark ALS" = data.frame(RMSE = spark_rmse, MSE = spark_mse, MAE = spark_mae))
+
+# Update column names to RMSE, MSE, and MAE
+colnames(acr) <- c("RMSE", "MSE", "MAE")
+
+acr
+
+
+```
+
+## Evaluate the Performance
+
+Evaluate the running time for both recommender systems.
+
+```{r, eval=TRUE}
+
+# Set up data frame for running time performance
+runtime <- data.frame(Method=character(), Training=double(), Predicting=double(), Top_N=double())
+
+
+# Combine the running time for the Recommenderlab ALS model
+runtime <- rbind(runtime, data.frame(Method  = "Recommenderlab",
+                                             Training = round(train_time_rec$toc - train_time_rec$tic, 2),
+                                             Predicting = round(predict_time_rec$toc - predict_time_rec$tic, 2),
+                                             Top_N = round(top_n_time_rec$toc - top_n_time_rec$tic, 2)))
+
+# Combine the running time for the Spark ALS model
+runtime<- rbind(runtime, data.frame(Method  = "Spark",
+                                             Training = round(train_time_sp$toc - train_time_sp$tic, 2),
+                                             Predicting = round(predict_time_sp$toc - predict_time_sp$tic, 2),
+                                             Top_N = round(top_n_time_sp$toc - top_n_time_sp$tic, 2)))
+
+# Remove row names
+rownames(runtime) <- NULL
+
+runtime
+
+```
+
+# Conclusion
+
+From the evaluation results, we can see that the Spark ALS recommender system has lower RMSE, MSE, and MAE values than the Recommenderlab ALS recommender system. However, the running time is significant higher for Spark in training the model while much lower in predicting the model. For predicting the Top N recommendations, again the Recommenderlab is beating the Spark. For predicting the top 5 recommendations, Spark took 88.28 seconds while the Recommenderlab only took 56.66 seconds.
+
+
+From a performance perspective Spark is better which seems to be the great advantage of distributed platforms. When we are working with massive amounts of data(for example centralized data with many different collection points), we can consider using distributed platforms. If we are not dealing with big data sets then using distributed platforms such as Spark may not be prefered due to it's implementation complexity and cost.During the process we also ran into some issues with running spark, we got variety of different errors such as "local host did not respond" We ended up using a different computer to make it work. This shows some complexity of Spark depending on the Programming language or IDE that is being used. However, considering the performance measures it seems Spark is a good choice to work with.
+
+   
+# Reference
+
+Gorakala, K.G. & Usuelli, M. (2015, Sept). Building a Recommendation System with R (pp. 50-92). Packt Publishing Ltd.
+
+Hashler, M. & Vereet, B. (2019, Aug 27). Package ‘recommenderlab’. CRAN. Retrieved from https://cran.r-project.org/web/packages/recommenderlab/recommenderlab.pdf.
+
+Luraschi, J., Kuo, K., & Ruiz, E. (2019, Oct 29). Mastering Spark with R. O'Reilly. Retrieved from https://therinspark.com/tuning.html
+
+
+
